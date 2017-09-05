@@ -44,6 +44,8 @@ typedef struct OtherCar {
   int lane;
   double v;
   double next_s;
+  vector<double> path_x;
+  vector<double> path_y;
 }OtherCar;
 
 #endif
