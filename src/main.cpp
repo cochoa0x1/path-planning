@@ -288,7 +288,7 @@ void generate_path(vector<double> &xs, vector<double> &ys, double aggro, double 
 
   //add the new path elements
   //double dist_inc = .2;
-  for( int i = 0; i < 50-N ; i++){
+  for( int i = 0; i < PATH_LENGTH-N ; i++){
     double _x = last_x + (i+1)*.02*target_speed*0.44704; //0.44704 mph to meter per second
     double _y = spline_path(_x);
 
@@ -359,82 +359,76 @@ double path_score(vector<double> xs
   path_dt(xs,ys, vx, vy);
 
   vector<double> v_stats = path_norm_stats(vx,vy);
-  cout << "v stats: " << v_stats[0] << ", " << v_stats[1] << ", " << v_stats[2] << endl;
-
+  //cout << "v stats: " << v_stats[0] << ", " << v_stats[1] << ", " << v_stats[2] << endl;
 
   vector<double> ax, ay;
   path_dt(vx,vy, ax, ay);
 
   vector<double> a_stats = path_norm_stats(ax,ay);
-  cout << "a stats: " << a_stats[0] << ", " << a_stats[1] << ", " << a_stats[2] << endl;
+  //cout << "a stats: " << a_stats[0] << ", " << a_stats[1] << ", " << a_stats[2] << endl;
 
   vector<double> jx, jy;
   path_dt(ax,ay, jx, jy);
 
   vector<double> j_stats = path_norm_stats(jx,jy);
-  cout << "j stats: " << j_stats[0] << ", " << j_stats[1] << ", " << j_stats[2] << endl;
+  //cout << "j stats: " << j_stats[0] << ", " << j_stats[1] << ", " << j_stats[2] << endl;
+
+
+  //this is the penalty for going over the speed limit, accel limit and jerk limit
+  double param_score =0;
+
+  if(target_speed <=0 || target_speed >= SPEED_LIMIT_MPH){
+    param_score+=500;
+  }
+
+  if(a_stats[0] >= ACCEL_LIMIT_MPSS){
+    param_score+=500;
+  }
+
+  if(j_stats[0] >= J_LIMIT_MPSSS){
+    param_score+=500;
+  }
 
   //in general don't like changing lanes
   double lane_change_penalty = 10*abs(target_lane-current_lane);
 
   //slow speed penalty
-  double speed_penalty = 10.0*(49.5 - target_speed);
-  if(target_speed > 49.5 || target_speed < 0){
-    speed_penalty = 2000;
+  double speed_penalty = 5.0*(SPEED_LIMIT_MPH - target_speed);
+  if(speed_penalty <= 0.0){speed_penalty =0.0;}
+
+  double accel_penalty = 0;
+  if(target_speed > SPEED_LIMIT_MPH*.5){
+    accel_penalty = a_stats[0];
   }
 
-  //acceleration penalty, in general don't want to accelerate
-  double accel_penalty = 1.0*abs(target_speed-current_speed);
-
-
-
-  //if there is going to be a head on collision, have a large penalty
-
-  //if there is a car ahead of us change lanes
-
   double collision_penalty =0;
+
   for(auto car : cars){
 
       //see if paths intersect. get the min distance between the paths_x
-      double min_distance = min_distance_between_paths(car.path_x, car.path_y, xs, ys);
-      cout << "car id: " << car._id << " lane: " << car.lane << " distance: " << min_distance << endl;;
+      double d = min_distance_between_paths(car.path_x, car.path_y, xs, ys);
 
-      //if the car is in the same lane, and it is currently in front
-      if(car.lane == target_lane && min_distance < 12){
-          collision_penalty += 1e6/(min_distance*min_distance+1);
-      }
+      if(car.lane == target_lane){
 
-      //if the car is between the lanes we are changing, add a penalty if we would be close
-      if(car.lane != target_lane && car.lane != current_lane && abs(current_lane-target_lane) ==2 && min_distance< 10){
-        collision_penalty += 1e6/(min_distance*min_distance+1);
+        //for the current lane, don't count cars behind you
+        if(car.lane ==current_lane && car.s < smv.car_s){
+          //nothing
+        }else{
+          collision_penalty+=1e5/(d*d+1);
+        }
+
       }
-      //
-      // //if the car is in front of us either in this lane or when we change
-      // double d = fabs(car.next_s - smv.car_s);
-      //
-      // if(car.lane == target_lane && d < 60 && car.next_s >= smv.car_s){
-      //   collision_penalty+=1e7/(d*d+1);
-      // }
-      //
-      // //if we are changing lanes, we don't want to cut another car off
-      // if(car.lane == target_lane && d < 45 && (car.next_s < smv.car_s) && current_lane!=target_lane){
-      //   collision_penalty+=1000;
-      // }
-      //
-      // //guard against the double lange change
-      // if(car.lane != target_lane && car.lane != current_lane && d < 45 && abs(current_lane-target_lane) ==2){
-      //   collision_penalty+=1000;
-      // }
+      else if(car.lane != target_lane && car.lane != current_lane && abs(current_lane-target_lane) ==2){
+        //if the car is between the lanes we are changing, add a penalty if we would be close
+        collision_penalty +=1e5/(d*d+1);
+      }
   }
 
-  //don't drive slowly in the fast lane. or ie if you are gonna go fast
-  //drive in the fast lane
-  double fast_lane = 0;
-  if(target_lane != 0 && current_speed > 30){
-    fast_lane = 100;
-  }
+  double proper_lane_cost =0;
+  if(target_lane != 1){ proper_lane_cost = 25;} //prefer center lane
 
-  return lane_change_penalty+speed_penalty+collision_penalty+accel_penalty;
+  double total = param_score + lane_change_penalty + speed_penalty + collision_penalty+accel_penalty+proper_lane_cost;
+  return total;
 }
 
 int main() {
@@ -567,7 +561,7 @@ int main() {
               //calculate the car's path for the next time interval
               vector<double> car_path_x;
               vector<double> car_path_y;
-              for(int i=0; i < 20; i++){
+              for(int i=0; i < 50; i++){
                 double next_s = car.s + (i)*.02*car.v;
                 double next_d = car.d;
                 vector<double> xy = getXY(next_s, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
@@ -592,27 +586,28 @@ int main() {
             lane_options.push_back(2);
 
             vector<double> dv_options;
-            dv_options.push_back(-2);
-            dv_options.push_back(-1);
-            dv_options.push_back(0);
-            dv_options.push_back(1);
-            dv_options.push_back(2.0);
-            dv_options.push_back(3.0);
+            for(double i =-1.75; i < 1.75; i+=.25){
+              dv_options.push_back(i);
+            }
+
 
             vector<vector<double>> paths_x;
             vector<vector<double>> paths_y;
             vector<double> path_scores;
 
-            cout << "current car speed: " << car_speed << endl;
+            //cout << "current car speed: " << car_speed << endl;
             for(auto new_lane : lane_options){
               for(auto dv : dv_options){
                 double target_speed = car_speed+dv;
+                if(target_speed <= 1){
+                  target_speed = 1;
+                }
 
                 vector<double> next_x_vals;
                 vector<double> next_y_vals;
-                generate_path(next_x_vals, next_y_vals,30.0, target_speed, new_lane, smv, mapv);
+                generate_path(next_x_vals, next_y_vals,35.0, target_speed, new_lane, smv, mapv);
                 double score = path_score(next_x_vals, next_y_vals, target_speed, new_lane, car_speed, lane,cars,smv);
-                cout << " lane: "<< new_lane << " , dv: " << dv << " score: " << score << endl;
+                //cout << " lane: "<< new_lane << " , dv: " << dv << " score: " << score << endl;
 
                 paths_x.push_back(next_x_vals);
                 paths_y.push_back(next_y_vals);
@@ -622,7 +617,7 @@ int main() {
             }
 
             //find the lowest score path_scores
-            double lowest =1e8;
+            double lowest =1e12;
             int lowest_index =0;
             for(int i =0; i< path_scores.size(); i++){
               if(path_scores[i] < lowest){

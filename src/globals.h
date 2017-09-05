@@ -6,6 +6,12 @@
 
 using namespace std;
 
+const double SPEED_LIMIT_MPH = 48.0;
+const double SPEED_LIMIT_MPS = SPEED_LIMIT_MPH*0.44704;
+const double ACCEL_LIMIT_MPSS = 10.0;
+const double J_LIMIT_MPSSS = 500.0;
+const double PATH_LENGTH = 50;
+
 typedef struct SimulationVars {
     double car_x;
     double car_y;
